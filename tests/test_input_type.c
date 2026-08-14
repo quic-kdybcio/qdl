@@ -71,6 +71,7 @@ static void test_xml_roots(void **state)
 
 	assert_int_equal(detect_xml("<patches/>"), QDL_FILE_PATCH);
 	assert_int_equal(detect_xml("<data><program/></data>"), QDL_FILE_PROGRAM);
+	assert_int_equal(detect_xml("<data><erase/></data>"), QDL_FILE_PROGRAM);
 	assert_int_equal(detect_xml("<data><read/></data>"), QDL_FILE_READ);
 	assert_int_equal(detect_xml("<data><ufs/></data>"), QDL_FILE_UFS);
 	assert_int_equal(detect_xml("<contents/>"), QDL_FILE_CONTENTS);
