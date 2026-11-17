@@ -1,8 +1,8 @@
 # Qualcomm Download
 
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![Build on push](https://github.com/linux-msm/qdl/actions/workflows/build.yml/badge.svg)](https://github.com/linux-msm/qdl/actions/workflows/build.yml)
-[![Latest release](https://img.shields.io/github/v/release/linux-msm/qdl?sort=semver)](https://github.com/linux-msm/qdl/releases/latest)
+[![Build on push](https://github.com/qualcomm/qdl/actions/workflows/build.yml/badge.svg)](https://github.com/qualcomm/qdl/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/qualcomm/qdl?sort=semver)](https://github.com/qualcomm/qdl/releases/latest)
 [![Debian package](https://img.shields.io/debian/v/qdl/unstable?logo=debian&label=Debian)](https://tracker.debian.org/pkg/qdl)
 [![Fedora package](https://img.shields.io/fedora/v/qdl?logo=fedora&label=Fedora)](https://packages.fedoraproject.org/pkgs/qdl/qdl/)
 [![Homebrew formula](https://img.shields.io/homebrew/v/qdl?logo=homebrew&label=Homebrew)](https://formulae.brew.sh/formula/qdl)
