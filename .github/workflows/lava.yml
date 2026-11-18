@@ -1,0 +1,114 @@
+name: LAVA
+
+# Needs the LAVATOKEN secret, the LAVA_URL variable and a "lava"
+# environment with required reviewers.
+#
+# The jobs build and run the tested commit next to lab hardware. On pull
+# requests the run therefore waits for a maintainer to approve it, and only
+# the qdl commit comes from the pull request: this workflow, the job
+# definitions and render.py are the base branch's. Never check out the
+# pull request's tree here.
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+  workflow_dispatch:
+    inputs:
+      boards:
+        description: 'JSON list of boards to test (default: all in .github/lava)'
+        required: false
+        default: ''
+      pr:
+        description: 'Pull request to test instead of the dispatched commit'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  boards:
+    runs-on: ubuntu-24.04
+    # Approval gate for pull requests; the board jobs wait on this job.
+    environment: ${{ github.event_name == 'pull_request_target' && 'lava' || '' }}
+    outputs:
+      boards: ${{ steps.list.outputs.boards }}
+      ref: ${{ steps.ref.outputs.ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: List boards
+        id: list
+        env:
+          BOARDS: ${{ inputs.boards }}
+        run: |
+          if [ -z "$BOARDS" ]; then
+            BOARDS=$(ls .github/lava/*.yaml | grep -v hil-steps |
+                     sed 's@.*/\(.*\)\.yaml@"\1"@' | paste -sd, -)
+            BOARDS="[$BOARDS]"
+          fi
+          echo "boards=$BOARDS" >> "$GITHUB_OUTPUT"
+
+      # Resolved once, so every board tests the same commit: the one the
+      # approval was given for.
+      - name: Resolve commit
+        id: ref
+        env:
+          PR: ${{ inputs.pr }}
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$PR" ]; then
+            case "$PR" in *[!0-9]*) echo "bad pr: $PR"; exit 1;; esac
+            REF=$(git ls-remote origin "refs/pull/$PR/head" | cut -f1)
+            [ -n "$REF" ] || { echo "pull request $PR not found"; exit 1; }
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Testing $REF" >> "$GITHUB_STEP_SUMMARY"
+
+  lava:
+    needs: boards
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.boards.outputs.boards) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    concurrency:
+      group: lava-${{ matrix.board }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Render LAVA job
+        id: render
+        env:
+          LAVA_URL: ${{ vars.LAVA_URL }}
+          BOARD: ${{ matrix.board }}
+          QDL_REPO: ${{ github.server_url }}/${{ github.repository }}
+          QDL_REF: ${{ needs.boards.outputs.ref }}
+        run: |
+          python3 .github/lava/render.py \
+            -D "QDL_REPO=$QDL_REPO" -D "QDL_REF=$QDL_REF" \
+            ".github/lava/$BOARD.yaml" > lava-job.yaml
+          # lava-action wants the bare host name
+          HOST=${LAVA_URL#*://}
+          echo "host=${HOST%%/*}" >> "$GITHUB_OUTPUT"
+
+      # Suite failures leave the job Incomplete; lone failed cases can be
+      # lab housekeeping (e.g. power-off), so do not fail on those.
+      - name: Run LAVA job
+        uses: foundriesio/lava-action@2392ee48130c6d99c97bb91cddb46d1fcde43f3e # v14
+        with:
+          lava_token: ${{ secrets.LAVATOKEN }}
+          lava_url: ${{ steps.render.outputs.host }}
+          job_definition: lava-job.yaml
+          wait_for_job: true
+          fail_action_on_failure: false
+          fail_action_on_incomplete: true
+          save_result_as_artifact: true
+          result_file_name: lava-results-${{ matrix.board }}
