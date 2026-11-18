@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Test steps shared by the board jobs; render.py splices them in at
+# "# @INCLUDE hil-steps.yaml@". Set by the job beforehand:
+#
+#   HIL_PATH        directory of the main build inside the image tarball
+#   HIL_STORAGE     storage the suite runs against (emmc, nvme, ufs)
+#   HIL_PROGRAMMER  Firehose programmer file name
+#   HIL_SPINOR      optional subdirectory with a SPI-NOR build to flash
+#                   before the suite
+#   HIL_PARTITION   optional partition for the read/erase/write steps
+#   HIL_SKIP        optional suite step to leave out, by its meson test
+#                   name without the "HIL " prefix
+#
+# The test shell runs under "set -e".
+- >-
+  export DEBIAN_FRONTEND=noninteractive;
+  apt-get update -qq >/dev/null &&
+  apt-get install -y -qq --no-install-recommends git ca-certificates
+  build-essential pkg-config libusb-1.0-0-dev libxml2-dev libzip-dev
+  meson ninja-build usbutils >/dev/null &&
+  lava-test-case deps --result pass ||
+  { lava-test-case deps --result fail; lava-test-raise deps; }
+- >-
+  git clone -q @QDL_REPO@ /qdl && cd /qdl &&
+  { git cat-file -e @QDL_REF@ 2>/dev/null || git fetch -q origin @QDL_REF@; } &&
+  git checkout -q @QDL_REF@ && git log -1 --oneline &&
+  meson setup build >/dev/null && meson compile -C build >/dev/null &&
+  ./build/qdl --version &&
+  lava-test-case build-qdl --result pass ||
+  { lava-test-case build-qdl --result fail; lava-test-raise build-qdl; }
+- >-
+  F=$(find /lava-downloads -name '*.tar*' | head -1) && echo $F &&
+  mkdir -p /img && tar xf $F -C /img && ln -sfn /img/$HIL_PATH /flash &&
+  ls /flash/ /flash/$HIL_SPINOR &&
+  test -f /flash/$HIL_PROGRAMMER && test -f /flash/rawprogram0.xml &&
+  lava-test-case unpack-build --result pass ||
+  { lava-test-case unpack-build --result fail; lava-test-raise unpack-build; }
+- >-
+  SER=$(echo $LAVA_BOARD_ID | sed -n 's/.*SN:\([0-9A-Fa-f]*\).*/\1/p');
+  [ -n "$SER" ] || SER=$LAVA_BOARD_ID;
+  echo $SER > /tmp/serial; echo serial=$SER
+# lava-device-command needs this shell's stdin/stdout, so it cannot run
+# as QDL_HIL_ENTER_EDL_CMD under meson.
+- lava-device-command qdl_enter || lava-test-raise 'qdl_enter failed'
+# The suite drives one storage: flash SPI-NOR separately, then re-enter
+# EDL because that run resets the board.
+- >-
+  if [ -n "$HIL_SPINOR" ]; then
+  for i in $(seq 1 60); do lsusb -d 05c6:9008 && break; sleep 2; done;
+  lsusb -d 05c6:9008 || lava-test-raise 'no EDL device after qdl_enter';
+  cd /flash/$HIL_SPINOR; RC=0;
+  timeout 1800 /qdl/build/qdl --debug --storage spinor --serial $(cat /tmp/serial)
+  $HIL_PROGRAMMER rawprogram*.xml patch*.xml > /tmp/spinor.txt 2>&1 || RC=$?;
+  grep -v FIREHOSE /tmp/spinor.txt | tail -n 40;
+  if [ $RC = 0 ]; then lava-test-case flash-spinor --result pass;
+  else lava-test-case flash-spinor --result fail;
+  lava-test-raise "spinor flash failed, rc=$RC"; fi;
+  fi
+- >-
+  [ -z "$HIL_SPINOR" ] || lava-device-command qdl_enter ||
+  lava-test-raise 'qdl_enter failed'
+- >-
+  cd /qdl;
+  export QDL_HIL_BUILD=/flash QDL_HIL_STORAGE=$HIL_STORAGE
+  QDL_HIL_PROGRAMMER=/flash/$HIL_PROGRAMMER QDL_HIL_DEBUG=1
+  QDL_HIL_SETTLE=120 QDL_HIL_SERIAL=$(cat /tmp/serial);
+  [ -z "$HIL_PARTITION" ] || export QDL_HIL_PARTITION=$HIL_PARTITION;
+  RC=0;
+  meson test -C build --list --suite hil 2>/dev/null |
+  sed -n 's@^.*\(HIL .*\)$@\1@p' | grep -v -x -F "HIL $HIL_SKIP" |
+  xargs -d '\n' meson test -C build --suite hil --print-errorlogs
+  > /tmp/hil.txt 2>&1 || RC=$?;
+  tail -n 400 /tmp/hil.txt;
+  sed -n -E 's@^ *[0-9]+/[0-9]+ .*HIL (.*[^ ]) +(OK|SKIP|FAIL|TIMEOUT|ERROR)( .*)?$@\1|\2@p'
+  /tmp/hil.txt > /tmp/hil.res || true;
+  [ -z "$HIL_SKIP" ] || echo "$HIL_SKIP|SKIP" >> /tmp/hil.res;
+  while IFS='|' read -r n r; do
+  c=hil-$(echo "$n" | tr 'A-Z /+' 'a-z---');
+  case $r in OK) v=pass;; SKIP) v=skip;; *) v=fail;; esac;
+  lava-test-case "$c" --result $v;
+  done < /tmp/hil.res;
+  [ -s /tmp/hil.res ] || lava-test-raise 'HIL suite reported no results';
+  [ $RC = 0 ] || lava-test-raise "HIL suite failed, rc=$RC"

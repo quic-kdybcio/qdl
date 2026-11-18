@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# qdl HIL suite on qcs5430-rb3gen2-lite, using the lab's health-check image and boot.
+# Rendered by render.py.
+device_type: qcs5430-rb3gen2-lite
+job_name: qdl HIL @QDL_REF@ - qcs5430-rb3gen2-lite
+priority: medium
+visibility: public
+context:
+  lava_test_results_dir: /home/fio/lava-%s
+  test_character_delay: 10
+metadata:
+  qdl.repo: '@QDL_REPO@'
+  qdl.commit: '@QDL_REF@'
+timeouts:
+  job:
+    minutes: 120
+  action:
+    minutes: 90
+  connection:
+    minutes: 10
+actions:
+- deploy:
+    to: downloads
+    namespace: hil
+    timeout:
+      minutes: 30
+    images:
+      image:
+        headers:
+          QLIAuthorization: Q_QLI_S3_TOKEN
+        url: https://qli-prod-artifacts.qualcomm.com/qli-prd-foundri-lava-gh-artifacts/health-check/lmp-factory-image-qcm6490.qcomflash.kernelci.tar.gz
+- test:
+    namespace: hil
+    timeout:
+      minutes: 90
+    # for lava-device-command qdl_enter
+    device_commands: true
+    docker:
+      image: ghcr.io/lava-mcp/lava-mcp/interactive:latest
+    definitions:
+    - from: inline
+      name: qdl-hil
+      path: inline/qdl-hil.yaml
+      repository:
+        metadata:
+          format: Lava-Test Test Definition 1.0
+          name: qdl-hil
+          description: build qdl and run its HIL suite against the board
+        run:
+          steps:
+          - export HIL_PATH=lmp-factory-image-qcm6490-kernelci HIL_STORAGE=ufs HIL_PROGRAMMER=prog_firehose_ddr.elf
+          # @INCLUDE hil-steps.yaml@
+# The suite ends with a reset: check the board boots.
+- deploy:
+    images:
+      image:
+        headers:
+          QLIAuthorization: Q_QLI_S3_TOKEN
+        url: https://qli-prod-artifacts.qualcomm.com/qli-prd-foundri-lava-gh-artifacts/health-check/rb3g2/Image
+      dtb:
+        headers:
+          QLIAuthorization: Q_QLI_S3_TOKEN
+        url: https://qli-prod-artifacts.qualcomm.com/qli-prd-foundri-lava-gh-artifacts/health-check/rb3g2/qcs6490-rb3gen2.dtb
+      ramdisk:
+        headers:
+          QLIAuthorization: Q_QLI_S3_TOKEN
+        url: https://qli-prod-artifacts.qualcomm.com/qli-prd-foundri-lava-gh-artifacts/health-check/rb3g2/newramdisk.gz
+    timeout:
+      minutes: 20
+    to: downloads
+    namespace: target
+    postprocess:
+      docker:
+        image: ghcr.io/mwasilew/docker-mkbootimage:master
+        steps:
+        - mkbootimg --header_version 2 --kernel Image --dtb qcs6490-rb3gen2.dtb --cmdline "earlycon clk_ignore_unused pd_ignore_unused audit=0" --ramdisk newramdisk.gz --output boot.img
+- deploy:
+    images:
+      boot:
+        url: downloads://boot.img
+    timeout:
+      minutes: 20
+    to: download
+    namespace: target
+- boot:
+    namespace: target
+    prompts:
+    - root@(.*):[/~]#
+    timeout:
+      minutes: 15
+    method: fastboot
