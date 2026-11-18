@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# qdl HIL suite on qrb2210-rb1, using the lab's health-check image and boot.
+# Rendered by render.py.
+device_type: qrb2210-rb1
+job_name: qdl HIL @QDL_REF@ - qrb2210-rb1
+priority: medium
+visibility: public
+context:
+  test_character_delay: 10
+metadata:
+  qdl.repo: '@QDL_REPO@'
+  qdl.commit: '@QDL_REF@'
+timeouts:
+  job:
+    minutes: 120
+  action:
+    minutes: 90
+  connection:
+    minutes: 10
+actions:
+- deploy:
+    to: downloads
+    namespace: hil
+    timeout:
+      minutes: 30
+    images:
+      image:
+        headers:
+          QLIAuthorization: Q_QLI_S3_TOKEN
+        url: https://qli-prod-artifacts.qualcomm.com/qli-prd-foundri-lava-gh-artifacts/health-check/rb1/core-image-base-rb1-core-kit-v2.rootfs.qcomflash.tar.gz
+- test:
+    namespace: hil
+    timeout:
+      minutes: 90
+    # for lava-device-command qdl_enter
+    device_commands: true
+    docker:
+      image: ghcr.io/lava-mcp/lava-mcp/interactive:latest
+    definitions:
+    - from: inline
+      name: qdl-hil
+      path: inline/qdl-hil.yaml
+      repository:
+        metadata:
+          format: Lava-Test Test Definition 1.0
+          name: qdl-hil
+          description: build qdl and run its HIL suite against the board
+        run:
+          steps:
+          - export HIL_PATH=core-image-base-rb1-core-kit HIL_STORAGE=emmc HIL_PROGRAMMER=prog_firehose_ddr.elf
+          # @INCLUDE hil-steps.yaml@
+# The suite ends with a reset: check the board boots.
+- boot:
+    namespace: hil
+    method: minimal
+    failure_retry: 3
+    timeout:
+      minutes: 15
+    auto_login:
+      login_prompt: 'login:'
+      username: root
+    prompts:
+    - root@(.*):[/~]#
