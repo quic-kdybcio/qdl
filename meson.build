@@ -1,7 +1,7 @@
 project('qdl', 'c',
   default_options : ['warning_level=2', 'optimization=2'],
   license: 'BSD-3-Clause',
-  meson_version: '>=0.56.0'
+  meson_version: '>=0.57.0'
 )
 
 # Use 64-bit file offsets everywhere. This must be consistent across every
@@ -31,6 +31,14 @@ libzip_dep = dependency('libzip', required: get_option('zip-container'))
 help2man = find_program('help2man', required: false)
 cmocka_dep = dependency('cmocka', required: get_option('tests'))
 
+# Rust is a hard build requirement: pathbuf and the other ported helpers
+# are compiled into libqdl_rs.a by cargo. Dependency lookup happens here so
+# a missing toolchain fails with a pointer to the install instructions.
+cargo = find_program('cargo', required: false)
+if not cargo.found()
+  error('cargo is required to build qdl; install Rust from https://rustup.rs')
+endif
+
 # Public API headers live in include/, implementation headers in src/.
 # '.' adds the top-level build dir, where configure_file generates
 # version.h, so targets in subdirs (e.g. tests/) resolve it too.
@@ -49,7 +57,47 @@ if host_machine.system() == 'windows'
   ]
 endif
 
-common_dep = [libusb_dep, libxml_dep, ws2_dep, setupapi_dep]
+# --- Rust static library ---
+# cargo builds the rust/ workspace in release mode. build.rs writes
+# qdl_rs.h (the C prototypes for every #[export] function) next to
+# version.h in the build root, so C sources include it like any other
+# generated header. build_always_stale lets cargo decide what to rebuild.
+rust_manifest = join_paths(meson.project_source_root(), 'rust', 'qdl-rs', 'Cargo.toml')
+rust_script = join_paths(meson.project_source_root(), 'scripts', 'build_rust.sh')
+rust_lib = custom_target('qdl_rs',
+  command: ['sh', rust_script, cargo.full_path(), rust_manifest,
+            '@OUTDIR@/rust-target', '@OUTPUT0@', '@OUTPUT1@'],
+  output: ['libqdl_rs.a', 'qdl_rs.h'],
+  build_always_stale: true,
+)
+
+# std pulls in these system libraries when linked statically. Each one is
+# optional so the list works on glibc, musl and macOS alike.
+rust_sys_names = ['gcc_s', 'util', 'rt', 'pthread', 'm', 'dl']
+if host_machine.system() == 'windows'
+  rust_sys_names = ['ws2_32', 'userenv', 'bcrypt', 'ntdll', 'advapi32']
+endif
+rust_sys_libs = []
+foreach name : rust_sys_names
+  lib = meson.get_compiler('c').find_library(name, required: false)
+  if lib.found()
+    rust_sys_libs += lib
+  endif
+endforeach
+
+# Carries the generated header (so C targets wait for cargo) and the static
+# library (linked by path, since meson cannot link a custom target directly).
+rust_dep = declare_dependency(
+  sources: rust_lib[1],
+  link_args: [rust_lib[0].full_path()],
+  dependencies: rust_sys_libs,
+)
+
+common_dep = [libusb_dep, libxml_dep, ws2_dep, setupapi_dep, rust_dep]
+# The compile-only view drops sources, so the generated header is also
+# listed as a source of each target that includes pathbuf.h. That makes
+# ninja run cargo before those objects are compiled.
+rust_header = rust_lib[1]
 compile_view_deps = [libusb_dep, libxml_dep]
 
 # Zip container support is optional; the src subdirectory swaps the
@@ -89,7 +137,7 @@ shared_lib = static_library('qdl_common', common_sources,
 
 # --- qdl executable ---
 qdl_exe = executable('qdl',
-  sources : qdl_sources + [version_h],
+  sources : qdl_sources + [version_h, rust_header],
   link_with: shared_lib,
   dependencies : common_compile_dep,
   include_directories : inc,
@@ -136,7 +184,7 @@ endif
 nbdkit_dep = dependency('nbdkit', required: get_option('nbdkit'))
 if nbdkit_dep.found()
   shared_module('nbdkit-qdl-plugin',
-    sources : nbdkit_plugin_src + lib_sources + common_sources + [version_h],
+    sources : nbdkit_plugin_src + lib_sources + common_sources + [version_h, rust_header],
     dependencies : common_dep + [nbdkit_dep],
     include_directories : inc,
     name_prefix : '',

@@ -31,6 +31,9 @@ jobs:
           pipx ensurepath
           pipx install meson==1.4.0
 
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
       - name: Configure
         run: meson setup build
 
@@ -97,6 +100,11 @@ jobs:
             'pkgconfig(cmocka)' 'pkgconfig(libusb-1.0)' \
             'pkgconfig(libxml-2.0)' 'pkgconfig(libzip)'
 
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -137,6 +145,9 @@ jobs:
       - name: Dependencies
         run: |
           brew install cmocka libxml2 libzip meson ninja help2man zip dylibbundler
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
 
       - name: Configure
         run: meson setup build
@@ -204,6 +215,7 @@ jobs:
             mingw-w64-x86_64-libxml2
             mingw-w64-x86_64-libusb
             mingw-w64-x86_64-libzip
+            mingw-w64-x86_64-rust
             mingw-w64-x86_64-xz
             zip
 

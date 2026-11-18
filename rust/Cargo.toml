@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: BSD-3-Clause
+[workspace]
+resolver = "2"
+members = ["qdl-macros", "qdl-rs"]
+
+# The Rust code is linked into the C binaries as a static library. Panics
+# must not unwind across the C ABI, so abort instead.
+[profile.release]
+panic = "abort"

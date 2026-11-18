@@ -12,7 +12,7 @@ lib_sources = files(
   'firehose.c',
   'input_type.c', 'io.c', 'patch.c',
   'program.c', 'programmer.c', 'read.c', 'sahara_config.c', 'sha2.c', 'sim.c', 'ufs.c', 'usb.c',
-  'vip.c', 'sparse.c', 'gpt.c', 'flashmap.c', 'json.c', 'contents.c', 'pathbuf.c',
+  'vip.c', 'sparse.c', 'gpt.c', 'flashmap.c', 'json.c', 'contents.c',
 )
 
 # Zip container support: reading flash bundles (file_zip.c) and the
@@ -37,7 +37,6 @@ cli_src = files('cli.c')
 input_type_src = files('input_type.c')
 json_src     = files('json.c')
 patch_src   = files('patch.c')
-pathbuf_src = files('pathbuf.c')
 programmer_src = files('programmer.c')
 program_src = files('program.c')
 read_src    = files('read.c')

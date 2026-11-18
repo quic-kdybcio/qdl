@@ -5,22 +5,15 @@
 #ifndef __PATHBUF_H__
 #define __PATHBUF_H__
 
-#include <stdbool.h>
+/*
+ * struct pathbuf and the qdl_pathbuf_*() helpers are implemented in Rust
+ * (rust/qdl-rs/src/pathbuf.rs). Their declarations come from qdl_rs.h,
+ * which is generated at build time.
+ */
 #include <limits.h>
-#include <stddef.h>
 
-struct pathbuf {
-	char buf[PATH_MAX];
-	size_t len;
-};
+#include "qdl_rs.h"
 
-void qdl_pathbuf_reset(struct pathbuf *path);
-void qdl_pathbuf_dup(struct pathbuf *dst, const struct pathbuf *orig);
-int qdl_pathbuf_push(struct pathbuf *path, const char *component);
-const char *qdl_pathbuf_str(const struct pathbuf *path);
-
-void qdl_pathbuf_dirname(struct pathbuf *path);
-
-bool qdl_path_exists(const struct pathbuf *path);
+_Static_assert(QDL_PATH_MAX == PATH_MAX, "Rust path buffer size must match PATH_MAX");
 
 #endif

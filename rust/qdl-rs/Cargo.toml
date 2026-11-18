@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: BSD-3-Clause
+[package]
+name = "qdl-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "BSD-3-Clause"
+publish = false
+
+[lib]
+name = "qdl_rs"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+libc = "0.2"
+qdl-macros = { path = "../qdl-macros" }
+
+[build-dependencies]
+cbindgen = "0.29"
+quote = "1"
+syn = { version = "2", features = ["full"] }

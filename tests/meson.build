@@ -300,7 +300,6 @@ if cmocka_dep.found()
     sources : [
       'test_program_load_xml.c',
       'common.c',
-      pathbuf_src,
       program_src,
       util_src,
     ],
@@ -320,7 +319,6 @@ if cmocka_dep.found()
   test_pathbuf = executable('test_pathbuf',
     sources : [
       'test_pathbuf.c',
-      pathbuf_src,
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
@@ -337,7 +335,6 @@ if cmocka_dep.found()
   test_contents_selectors = executable('test_contents_selectors',
     sources : [
       'test_contents_selectors.c',
-      pathbuf_src,
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
@@ -355,7 +352,6 @@ if cmocka_dep.found()
     sources : [
       'test_contents_xml.c',
       'common.c',
-      pathbuf_src,
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
