@@ -48,6 +48,7 @@ bool qdl_debug;
 #define QDL_TIMEOUT_MAX 86400
 
 static const char *config_programmer;
+static char *config_serial;
 static enum qdl_storage_type config_storage = QDL_STORAGE_UFS;
 static int config_lun;
 static unsigned int config_timeout = 60;
@@ -77,6 +78,18 @@ static int qdl_plugin_config(const char *key, const char *value)
 		config_programmer = nbdkit_absolute_path(value);
 		if (!config_programmer)
 			return -1;
+	} else if (!strcmp(key, "serial")) {
+		if (!*value) {
+			nbdkit_error("serial must not be empty");
+			return -1;
+		}
+		/* @value only lives for the duration of this callback */
+		free(config_serial);
+		config_serial = strdup(value);
+		if (!config_serial) {
+			nbdkit_error("strdup: %m");
+			return -1;
+		}
 	} else if (!strcmp(key, "storage")) {
 		config_storage = decode_storage_type(value);
 		if (config_storage == QDL_STORAGE_UNKNOWN) {
@@ -148,7 +161,7 @@ static int qdl_device_open_wait(struct qdl_device *d)
 		nbdkit_debug("waiting for an EDL device (no timeout)");
 
 	for (;;) {
-		ret = usb_open_once(d, NULL, &visible);
+		ret = usb_open_once(d, config_serial, &visible);
 		if (ret == 0)
 			return 0;
 
@@ -171,12 +184,19 @@ static int qdl_device_open_wait(struct qdl_device *d)
 
 	/*
 	 * A device that is visible but cannot be opened is different from one
-	 * that is absent. This usually indicates insufficient permissions or
-	 * that the device is already in use by another process.
+	 * that is absent. Without a serial this usually indicates insufficient
+	 * permissions or that the device is already in use by another process;
+	 * with one, the visible devices may simply be other boards.
 	 */
-	if (visible)
+	if (visible && config_serial)
+		nbdkit_error("%d EDL device(s) visible after %us, none with serial '%s' could be opened",
+			     visible, config_timeout, config_serial);
+	else if (visible)
 		nbdkit_error("%d EDL device(s) visible after %us, none could be opened (permissions? in use?)",
 			     visible, config_timeout);
+	else if (config_serial)
+		nbdkit_error("no EDL device with serial '%s' found after %us",
+			     config_serial, config_timeout);
 	else
 		nbdkit_error("no EDL device found after %us", config_timeout);
 
