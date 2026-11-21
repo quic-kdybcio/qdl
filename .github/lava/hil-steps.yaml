@@ -11,6 +11,7 @@
 #   HIL_PARTITION   optional partition for the read/erase/write steps
 #   HIL_SKIP        optional suite step to leave out, by its meson test
 #                   name without the "HIL " prefix
+#   HIL_NBD         set to "no" to skip the nbdkit plugin suite
 #
 # The test shell runs under "set -e".
 - >-
@@ -18,14 +19,15 @@
   apt-get update -qq >/dev/null &&
   apt-get install -y -qq --no-install-recommends git ca-certificates
   build-essential pkg-config libusb-1.0-0-dev libxml2-dev libzip-dev
-  meson ninja-build usbutils >/dev/null &&
+  meson ninja-build usbutils nbdkit nbdkit-plugin-dev libnbd-bin >/dev/null &&
   lava-test-case deps --result pass ||
   { lava-test-case deps --result fail; lava-test-raise deps; }
 - >-
   git clone -q @QDL_REPO@ /qdl && cd /qdl &&
   { git cat-file -e @QDL_REF@ 2>/dev/null || git fetch -q origin @QDL_REF@; } &&
   git checkout -q @QDL_REF@ && git log -1 --oneline &&
-  meson setup build >/dev/null && meson compile -C build >/dev/null &&
+  meson setup build -Dnbdkit=enabled >/dev/null &&
+  meson compile -C build >/dev/null &&
   ./build/qdl --version &&
   lava-test-case build-qdl --result pass ||
   { lava-test-case build-qdl --result fail; lava-test-raise build-qdl; }
@@ -82,3 +84,25 @@
   done < /tmp/hil.res;
   [ -s /tmp/hil.res ] || lava-test-raise 'HIL suite reported no results';
   [ $RC = 0 ] || lava-test-raise "HIL suite failed, rc=$RC"
+# The nbdkit plugin suite needs a board that has not been programmed yet,
+# so re-enter EDL after the main suite's reset. The plugin resets the
+# board again when it exits.
+- >-
+  [ "$HIL_NBD" = no ] || lava-device-command qdl_enter ||
+  lava-test-raise 'qdl_enter failed'
+- >-
+  if [ "$HIL_NBD" != no ]; then
+  cd /qdl; RC=0;
+  meson test -C build --suite hil-nbd --print-errorlogs
+  > /tmp/hil-nbd.txt 2>&1 || RC=$?;
+  tail -n 200 /tmp/hil-nbd.txt;
+  sed -n -E 's@^ *[0-9]+/[0-9]+ .*HIL-NBD (.*[^ ]) +(OK|SKIP|FAIL|TIMEOUT|ERROR)( .*)?$@\1|\2@p'
+  /tmp/hil-nbd.txt > /tmp/hil-nbd.res || true;
+  while IFS='|' read -r n r; do
+  c=hil-nbd-$(echo "$n" | tr 'A-Z /+' 'a-z---');
+  case $r in OK) v=pass;; SKIP) v=skip;; *) v=fail;; esac;
+  lava-test-case "$c" --result $v;
+  done < /tmp/hil-nbd.res;
+  [ -s /tmp/hil-nbd.res ] || lava-test-raise 'nbdkit suite reported no results';
+  [ $RC = 0 ] || lava-test-raise "nbdkit suite failed, rc=$RC";
+  fi
