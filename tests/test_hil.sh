@@ -50,6 +50,19 @@
 #
 # Every step runs with --skip-reset to keep the programmer alive across
 # invocations; only the final step ends the session with the reset verb.
+#
+# The nbd step drives the nbdkit plugin instead of qdl. The plugin uploads
+# the programmer itself and resets the board when nbdkit exits, so the step
+# needs a device that has not been programmed yet and ends the session. It
+# lives in its own "hil-nbd" suite, run against a freshly entered EDL mode:
+#
+#   QDL_HIL_BUILD=... QDL_HIL_STORAGE=... meson test -C build --suite hil-nbd
+#
+# It needs a build with the plugin (nbdkit-plugin-dev) and the nbdkit,
+# nbdinfo and nbdcopy tools, and the suite skips otherwise, before entering
+# EDL mode. Besides reading, it writes the primary GPT of physical
+# partition 0 back with the bytes it has just read from it. A failed run
+# keeps those bytes and the nbdkit log in build/meson-logs/hil-nbd.*.
 
 set -e
 
@@ -91,22 +104,30 @@ mkdir -p "${HIL_TMPDIR}"
 # after the erase step, so erase/write restore the exact original bytes.
 SAVED_IMAGE="${HIL_TMPDIR}/readback.img"
 
+# Set by the nbd step while it holds the original GPT area, so a failure
+# can point at the copy needed to restore the board.
+NBD_KEEP=""
+
 on_exit() {
     local rc=$?
     if [[ ${rc} -ne 0 && ${rc} -ne ${SKIP} ]]; then
         mkdir -p "$(dirname "${ABORT_FILE}")" 2>/dev/null || true
         : > "${ABORT_FILE}"
+        [[ -z "${NBD_KEEP}" ]] ||
+            echo "original GPT area (area.img) and nbdkit log kept in ${NBD_KEEP}" >&2
     fi
 }
 trap on_exit EXIT
 
-# The suite's first step (highest meson priority). Suite-level setup -
-# resetting the fail-fast sentinel, entering EDL mode - must anchor to it:
-# doing either in a later step breaks the steps running before it. Keep
-# this in sync with the priorities in tests/meson.build.
-FIRST_STEP="list"
+# The suite's first step (highest meson priority): "list", or "nbd_list" in
+# the hil-nbd suite. Suite-level setup - resetting the fail-fast sentinel,
+# entering EDL mode - must anchor to it: doing either in a later step breaks
+# the steps running before it. Keep this in sync with the priorities in
+# tests/meson.build.
+FIRST_STEP=false
+[[ "${step}" == list || "${step}" == nbd_list ]] && FIRST_STEP=true
 
-if [[ "${step}" == "${FIRST_STEP}" ]]; then
+if ${FIRST_STEP}; then
     rm -f "${ABORT_FILE}"
     rm -rf "${HIL_TMPDIR:?}"/*
 fi
@@ -130,17 +151,6 @@ fi
 if [[ -e "${ABORT_FILE}" ]]; then
     echo "an earlier HIL step failed; stopping the suite" >&2
     exit ${SKIP}
-fi
-
-# For unattended runs an environment-provided command puts the board into
-# EDL mode ahead of the suite's first step. The list step polls for the
-# device afterwards (see QDL_HIL_SETTLE), so the command only needs to
-# trigger the mode switch, not wait for enumeration.
-if [[ "${step}" == "${FIRST_STEP}" && -n "${QDL_HIL_ENTER_EDL_CMD}" ]]; then
-    bash -c "${QDL_HIL_ENTER_EDL_CMD}" || {
-        echo "QDL_HIL_ENTER_EDL_CMD failed" >&2
-        exit 1
-    }
 fi
 
 IS_DIR=false
@@ -189,6 +199,37 @@ sha256_file() {
         exit ${SKIP}
     fi
 }
+
+# The nbd step's prerequisites. The hil-nbd suite checks them before
+# entering EDL mode too: if the nbd step skipped, nothing would start the
+# plugin whose exit resets the board, leaving it in EDL mode.
+nbd_prereqs() {
+    local tool
+    [[ -f "${builddir}/nbdkit-qdl-plugin.so" ]] || {
+        echo "nbdkit plugin not built (install nbdkit-plugin-dev)" >&2
+        exit ${SKIP}
+    }
+    for tool in nbdkit nbdinfo nbdcopy; do
+        command -v "${tool}" >/dev/null 2>&1 || {
+            echo "${tool} not found (install nbdkit and libnbd-bin)" >&2
+            exit ${SKIP}
+        }
+    done
+    need_programmer
+}
+
+[[ "${step}" == nbd_list ]] && nbd_prereqs
+
+# For unattended runs an environment-provided command puts the board into
+# EDL mode ahead of the suite's first step. The list step polls for the
+# device afterwards (see QDL_HIL_SETTLE), so the command only needs to
+# trigger the mode switch, not wait for enumeration.
+if ${FIRST_STEP} && [[ -n "${QDL_HIL_ENTER_EDL_CMD}" ]]; then
+    bash -c "${QDL_HIL_ENTER_EDL_CMD}" || {
+        echo "QDL_HIL_ENTER_EDL_CMD failed" >&2
+        exit 1
+    }
+fi
 
 # --- step implementations -------------------------------------------------
 
@@ -417,9 +458,114 @@ t_chipinfo() {
         { echo "chipinfo reported no chip identity:" >&2; cat "${out}" >&2; return 1; }
 }
 
+# p) Serve physical partition 0 through the nbdkit plugin and round-trip
+# its primary GPT over NBD: the advertised block size must match the sector
+# size the plugin logs, the GPT header must sit at LBA 1 for that sector
+# size, and writing the GPT back must leave the area read back unchanged. A
+# truncate filter limits the export to that area, so no client can stray
+# further, and only the GPT extent its header describes is written.
+t_nbd() {
+    local plugin="${builddir}/nbdkit-qdl-plugin.so"
+    nbd_prereqs
+
+    # 34 sectors of 4096 bytes: room for the primary GPT at either sector
+    # size, and a whole number of sectors of both.
+    local area=$(( 34 * 4096 ))
+    local args=( programmer="${PROGRAMMER}" storage="${STORAGE}" lun=0
+                 truncate="${area}" )
+    [[ -n "${SERIAL}" ]] && args+=( serial="${SERIAL}" )
+    [[ -n "${QDL_HIL_DEBUG}" ]] && args+=( debug=1 )
+
+    # Outside HIL_TMPDIR, which the next run clears: on failure this holds
+    # the only copy of the original GPT area. Removed once verified.
+    mkdir -p "${builddir}/meson-logs"
+    local dir; dir="$(mktemp -d "${builddir}/meson-logs/hil-nbd.XXXXXX")"
+    NBD_KEEP="${dir}"
+    local log="${dir}/nbdkit.log"
+
+    # The NBD client: read the area, find the GPT header at LBA 1 for
+    # either sector size, write back only the header and partition entries
+    # it describes, then read the whole area again.
+    cat > "${dir}/client.sh" <<'CLIENT'
+set -e
+uri=$1
+cd "${NBD_DIR}"
+le() { od -An -v -t "u$2" -j "$1" -N "$2" area.img | tr -d ' '; }
+nbdinfo --json "${uri}" > info.json
+nbdcopy "${uri}" area.img
+ss=
+for s in 512 4096; do
+    [[ "$(tail -c +$(( s + 1 )) area.img | head -c 8 | tr -d '\0')" == "EFI PART" ]] &&
+        { ss=${s}; break; }
+done
+[[ -n "${ss}" ]] || { echo "no GPT header at LBA 1" >&2; exit 1; }
+lba=$(le $(( ss + 72 )) 8)
+count=$(le $(( ss + 80 )) 4)
+size=$(le $(( ss + 84 )) 4)
+gpt=$(( (lba + (count * size + ss - 1) / ss) * ss ))
+(( lba >= 2 && gpt <= $(wc -c < area.img) )) || {
+    echo "GPT entries (LBA ${lba}, ${count} x ${size}) outside the area" >&2
+    exit 1
+}
+echo "writing back ${gpt} bytes of GPT"
+head -c "${gpt}" area.img > gpt.img
+nbdcopy gpt.img "${uri}"
+nbdcopy "${uri}" readback.img
+CLIENT
+
+    # nbdkit serves until the --run command exits, then unloads the plugin,
+    # which resets the board. ${uri} is set by nbdkit for that command only,
+    # not exported, so hand it to the client.
+    export NBD_DIR="${dir}"
+    # shellcheck disable=SC2016
+    if ! nbdkit -v -U - --filter=truncate "${plugin}" "${args[@]}" \
+            --run 'bash "$NBD_DIR/client.sh" "$uri"' >"${log}" 2>&1; then
+        echo "nbdkit session failed:" >&2
+        cat "${log}" >&2
+        return 1
+    fi
+
+    local geometry sector_size num_sectors block_size magic
+    local re='.*serving LUN 0; sector size \([0-9]*\) bytes, \([0-9]*\) sectors.*'
+    geometry="$(sed -n "s/${re}/\\1 \\2/p" "${log}" | head -1)"
+    read -r sector_size num_sectors <<< "${geometry}"
+    [[ -n "${sector_size}" ]] || {
+        echo "plugin did not log the LUN geometry:" >&2
+        cat "${log}" >&2
+        return 1
+    }
+    echo "LUN 0: ${num_sectors} sectors of ${sector_size} bytes"
+    (( num_sectors * sector_size > area )) || {
+        echo "LUN 0 is smaller than the GPT area" >&2
+        return 1
+    }
+
+    # Only reported when the plugin is built against nbdkit 1.30 or later
+    block_size="$(sed -n 's/.*"block_size_minimum": *\([0-9]*\).*/\1/p' "${dir}/info.json")"
+    if [[ -z "${block_size}" ]]; then
+        echo "export advertises no block size; not checking it"
+    elif [[ "${block_size}" != "${sector_size}" ]]; then
+        echo "export block size ${block_size} != sector size ${sector_size}" >&2
+        return 1
+    fi
+
+    magic="$(tail -c +$(( sector_size + 1 )) "${dir}/area.img" | head -c 8)"
+    [[ "${magic}" == "EFI PART" ]] || {
+        echo "no GPT header at LBA 1 for ${sector_size}-byte sectors" >&2
+        return 1
+    }
+    cmp "${dir}/area.img" "${dir}/readback.img" || {
+        echo "GPT area changed after writing it back over NBD" >&2
+        return 1
+    }
+
+    rm -rf "${dir}"
+    NBD_KEEP=""
+}
+
 # --- dispatch -------------------------------------------------------------
 case "${step}" in
-    list)               t_list ;;
+    list|nbd_list)      t_list ;;
     chipinfo)           t_chipinfo ;;
     flash_full)         t_flash_full ;;
     create_zip)         t_create_zip ;;
@@ -436,6 +582,7 @@ case "${step}" in
     write_image)        t_write_image ;;
     write_chunked)      t_write_chunked ;;
     verify_write)       t_verify_write ;;
+    nbd)                t_nbd ;;
     reset)              t_reset ;;
     *) echo "unknown step: ${step}" >&2; exit 99 ;;
 esac

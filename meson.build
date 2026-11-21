@@ -134,8 +134,9 @@ endif
 # just needs <nbdkit-plugin.h> and compiles all non-main sources into a shared
 # module named exactly "nbdkit-qdl-plugin.so".
 nbdkit_dep = dependency('nbdkit', required: get_option('nbdkit'))
+nbdkit_plugin = []
 if nbdkit_dep.found()
-  shared_module('nbdkit-qdl-plugin',
+  nbdkit_plugin = shared_module('nbdkit-qdl-plugin',
     sources : nbdkit_plugin_src + lib_sources + common_sources + [version_h],
     dependencies : common_dep + [nbdkit_dep],
     include_directories : inc,
