@@ -33,7 +33,7 @@ content used in the existing entries:
 
 ```bash
 # Everything merged since the previous release:
-gh api repos/linux-msm/qdl/releases/generate-notes \
+gh api repos/qualcomm/qdl/releases/generate-notes \
     -f tag_name="${VERSION}" -f target_commitish=master \
     -f previous_tag_name="$(git describe --tags --abbrev=0 master)" \
     --jq .body
