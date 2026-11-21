@@ -174,6 +174,14 @@ void ux_err_tag(enum ux_tag tag, const char *fmt, ...)
 	(void)fmt;
 }
 
+static unsigned int warn_count;
+
+void ux_warn(const char *fmt, ...)
+{
+	(void)fmt;
+	warn_count++;
+}
+
 void ux_info(const char *fmt, ...)
 {
 	(void)fmt;
@@ -435,6 +443,135 @@ static void test_missing_file_is_tolerated_with_allow_missing(void **state)
 	xmlFreeDoc(doc);
 }
 
+static xmlDoc *build_erase_doc(const char *partition_attr)
+{
+	char xml[1024];
+	int ret;
+
+	ret = snprintf(xml, sizeof(xml),
+		       "<data>"
+		       "<erase "
+		       "PAGES_PER_BLOCK=\"64\" "
+		       "SECTOR_SIZE_IN_BYTES=\"2048\" "
+		       "num_partition_sectors=\"1280\" "
+		       "start_sector=\"0\" "
+		       "%s/>"
+		       "</data>",
+		       partition_attr);
+	assert_true(ret > 0 && (size_t)ret < sizeof(xml));
+
+	return xmlReadMemory(xml, ret, "rawprogram.xml", NULL, 0);
+}
+
+static struct firehose_op *get_only_erase_op(struct list_head *ops)
+{
+	struct firehose_op *op;
+	struct list_head *it;
+	size_t count = 0;
+
+	list_for_each(it, ops)
+		count++;
+
+	if (count != 1)
+		fail_msg("expected exactly one firehose op, got %zu", count);
+
+	op = list_entry_first(ops, struct firehose_op, node);
+	if (op->type != FIREHOSE_OP_ERASE)
+		fail_msg("expected firehose op type ERASE, got %d", op->type);
+
+	return op;
+}
+
+/*
+ * NAND-generated rawprogram files carry erase tags without a
+ * physical_partition_number; the attribute is optional and defaults
+ * to partition 0.
+ */
+static void test_erase_without_physical_partition_number(void **state)
+{
+	struct firehose_op *op;
+	struct list_head ops = LIST_INIT(ops);
+	xmlDoc *doc;
+	int ret;
+
+	(void)state;
+
+	doc = build_erase_doc("");
+	if (!doc)
+		fail_msg("failed to parse synthetic erase XML");
+
+	warn_count = 0;
+	ret = program_load_xml(&ops, doc, NULL, TEST_PROGRAM_FILE, true, false, NULL, NULL);
+	if (ret)
+		fail_msg("erase without physical_partition_number should parse, got %d", ret);
+
+	op = get_only_erase_op(&ops);
+	if (op->partition != 0)
+		fail_msg("omitted physical_partition_number should default to 0, got %d",
+			 op->partition);
+	assert_int_equal(warn_count, 0);
+
+	firehose_free_ops(&ops);
+	xmlFreeDoc(doc);
+}
+
+/*
+ * Storage other than NAND has several physical partitions, so an erase tag
+ * without one still defaults to partition 0 but is reported.
+ */
+static void test_erase_without_physical_partition_number_non_nand(void **state)
+{
+	struct firehose_op *op;
+	struct list_head ops = LIST_INIT(ops);
+	xmlDoc *doc;
+	int ret;
+
+	(void)state;
+
+	doc = build_erase_doc("");
+	if (!doc)
+		fail_msg("failed to parse synthetic erase XML");
+
+	warn_count = 0;
+	ret = program_load_xml(&ops, doc, NULL, TEST_PROGRAM_FILE, false, false, NULL, NULL);
+	if (ret)
+		fail_msg("erase without physical_partition_number should parse, got %d", ret);
+
+	op = get_only_erase_op(&ops);
+	if (op->partition != 0)
+		fail_msg("omitted physical_partition_number should default to 0, got %d",
+			 op->partition);
+	assert_int_equal(warn_count, 1);
+
+	firehose_free_ops(&ops);
+	xmlFreeDoc(doc);
+}
+
+static void test_erase_with_physical_partition_number(void **state)
+{
+	struct firehose_op *op;
+	struct list_head ops = LIST_INIT(ops);
+	xmlDoc *doc;
+	int ret;
+
+	(void)state;
+
+	doc = build_erase_doc("physical_partition_number=\"2\" ");
+	if (!doc)
+		fail_msg("failed to parse synthetic erase XML");
+
+	ret = program_load_xml(&ops, doc, NULL, TEST_PROGRAM_FILE, true, false, NULL, NULL);
+	if (ret)
+		fail_msg("erase with physical_partition_number should parse, got %d", ret);
+
+	op = get_only_erase_op(&ops);
+	if (op->partition != 2)
+		fail_msg("physical_partition_number should be honored, got %d", op->partition);
+
+	firehose_free_ops(&ops);
+	xmlFreeDoc(doc);
+}
+
 int main(void)
 {
 	const struct CMUnitTest tests[] = {
@@ -444,6 +581,9 @@ int main(void)
 		cmocka_unit_test(test_current_directory_is_used_when_path_resolution_misses),
 		cmocka_unit_test(test_missing_file_fails_without_allow_missing),
 		cmocka_unit_test(test_missing_file_is_tolerated_with_allow_missing),
+		cmocka_unit_test(test_erase_without_physical_partition_number),
+		cmocka_unit_test(test_erase_without_physical_partition_number_non_nand),
+		cmocka_unit_test(test_erase_with_physical_partition_number),
 	};
 
 	return cmocka_run_group_tests(tests, NULL, NULL);
