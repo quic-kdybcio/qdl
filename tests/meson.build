@@ -140,6 +140,7 @@ if cmocka_dep.found()
     test_firehose = executable('test_firehose',
       sources : [
         'test_firehose.c',
+        json_src,
       ],
       dependencies : common_dep + [cmocka_dep],
       include_directories : inc,

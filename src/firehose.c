@@ -2053,6 +2053,132 @@ struct firehose_getsize_args {
 };
 
 /*
+ * Parse the decimal number at @s[@i], which must be followed by optional
+ * spaces and the end of the member (',' or '}'). Values that do not fit in a
+ * size_t are rejected.
+ */
+static bool storage_info_number(const char *s, size_t len, size_t i,
+				size_t *value)
+{
+	unsigned int digit;
+	size_t v = 0;
+
+	if (i == len || s[i] < '0' || s[i] > '9')
+		return false;
+
+	for (; i < len && s[i] >= '0' && s[i] <= '9'; i++) {
+		digit = s[i] - '0';
+		if (v > (SIZE_MAX - digit) / 10)
+			return false;
+		v = v * 10 + digit;
+	}
+
+	while (i < len && s[i] == ' ')
+		i++;
+	if (i == len || (s[i] != ',' && s[i] != '}'))
+		return false;
+
+	*value = v;
+	return true;
+}
+
+static const char storage_info_key[] = "storage_info";
+static const char storage_info_total_blocks[] = "total_blocks";
+static const char storage_info_block_size[] = "block_size";
+
+static bool storage_info_is_key(const char *name, size_t len,
+				const char *key, size_t key_size)
+{
+	return len == key_size - 1 && !memcmp(name, key, len);
+}
+
+/*
+ * Pick total_blocks and block_size out of the @len bytes at @s, a JSON-like
+ * blob that failed to parse, such as the "spec_version":ae80 of some NVMe
+ * programmers. Like the JSON path, only direct members of the top-level
+ * storage_info object are used; nesting and quoted strings are honoured.
+ * Returns true only when both values were found and are valid.
+ */
+static bool firehose_storage_info_scan(const char *s, size_t len,
+				       size_t *num_sectors, size_t *sector_size)
+{
+	bool have_blocks = false, have_size = false;
+	bool in_info = false;
+	unsigned int depth = 0;
+	size_t blocks, size;
+	size_t i, j, end;
+	const char *name;
+	size_t name_len;
+
+	for (i = 0; i < len; i++) {
+		if (s[i] == '{' || s[i] == '[') {
+			depth++;
+			continue;
+		}
+		if (s[i] == '}' || s[i] == ']') {
+			if (in_info && depth == 2)
+				break;
+			if (depth)
+				depth--;
+			continue;
+		}
+		if (s[i] != '"')
+			continue;
+
+		for (end = i + 1; end < len && s[end] != '"'; end++)
+			if (s[end] == '\\')
+				end++;
+		if (end >= len)
+			break;
+
+		name = s + i + 1;
+		name_len = end - i - 1;
+		i = end;
+
+		/* Only keys are of interest: skip string values */
+		for (j = end + 1; j < len && s[j] == ' '; j++)
+			;
+		if (j == len || s[j] != ':')
+			continue;
+		for (j++; j < len && s[j] == ' '; j++)
+			;
+
+		if (!in_info) {
+			if (depth == 1 && j < len && s[j] == '{' &&
+			    storage_info_is_key(name, name_len, storage_info_key,
+						sizeof(storage_info_key))) {
+				in_info = true;
+				depth++;
+				i = j;
+			}
+			continue;
+		}
+
+		if (depth != 2)
+			continue;
+
+		if (storage_info_is_key(name, name_len, storage_info_total_blocks,
+					sizeof(storage_info_total_blocks))) {
+			if (!storage_info_number(s, len, j, &blocks))
+				return false;
+			have_blocks = true;
+		} else if (storage_info_is_key(name, name_len, storage_info_block_size,
+					       sizeof(storage_info_block_size))) {
+			if (!storage_info_number(s, len, j, &size))
+				return false;
+			have_size = true;
+		}
+	}
+
+	if (!have_blocks || !have_size)
+		return false;
+
+	*num_sectors = blocks;
+	*sector_size = size;
+	return true;
+}
+
+/*
  * The programmer answers <getstorageinfo> with the storage geometry encoded as
  * a JSON blob inside a <log> value. Pick out the block size and block count.
  */
@@ -2065,6 +2191,7 @@ static int firehose_getstorageinfo_parser(xmlNode *node, void *data,
 	double total_blocks = 0;
 	double block_size = 0;
 	const char *start;
+	size_t len;
 	xmlChar *value;
 	int ret = 0;
 
@@ -2090,6 +2217,12 @@ static int firehose_getstorageinfo_parser(xmlNode *node, void *data,
 				args->num_sectors = total_blocks;
 			}
 			json_free(json);
+		} else {
+			ux_debug_tag(UX_TAG_FIREHOSE,
+				     "storage_info is not valid JSON, scanning it\n");
+			len = xmlStrlen(value) - (start - (char *)value);
+			firehose_storage_info_scan(start, len, &args->num_sectors,
+						   &args->sector_size);
 		}
 	} else {
 		ux_debug_tag(UX_TAG_FIREHOSE, "LOG: %s\n", value);
