@@ -10,6 +10,7 @@
  */
 #include <setjmp.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -24,24 +25,42 @@
 void ux_err(const char *fmt, ...) { (void)fmt; }
 
 /*
- * decode_programmer() references the Sahara image loader; the tests
- * exercise only the archive decoder, so a failing stub satisfies the
- * linker without pulling in sahara.c.
+ * decode_programmer() references the Sahara image loader. It fails unless
+ * the test arms it with @stub_blob, which it then hands out as the loaded
+ * file, so the tests need neither sahara.c nor real files.
  */
+static const char *stub_blob;
+static void *stub_blob_ptr;
+static bool stub_blob_freed;
+
 int load_sahara_image(struct qdl_zip *zip, const char *filename, struct sahara_image *image)
 {
 	(void)zip;
-	(void)filename;
-	(void)image;
-	return -1;
+
+	if (!stub_blob)
+		return -1;
+
+	image->name = strdup(filename);
+	image->ptr = strdup(stub_blob);
+	image->len = strlen(stub_blob);
+	assert_non_null(image->name);
+	assert_non_null(image->ptr);
+	stub_blob_ptr = image->ptr;
+	return 0;
 }
 
+/*
+ * Like the real decoder on an XML document that does not parse: report an
+ * error and leave the blob to the caller.
+ */
 int decode_sahara_config(struct sahara_image *blob, struct sahara_image *images,
 			 struct contents_filter *filter)
 {
-	(void)blob;
 	(void)images;
 	(void)filter;
+
+	if (blob->len >= 5 && !memcmp(blob->ptr, "<?xml", 5))
+		return -1;
 	return 0;
 }
 
@@ -55,6 +74,8 @@ void __attribute__((noreturn)) ux_die(int eval, const char *fmt, ...)
 void sahara_images_free(struct sahara_image *images, size_t count)
 {
 	for (size_t i = 0; i < count; i++) {
+		if (images[i].ptr && images[i].ptr == stub_blob_ptr)
+			stub_blob_freed = true;
 		free(images[i].name);
 		free(images[i].ptr);
 		images[i] = (struct sahara_image){0};
@@ -253,6 +274,23 @@ static void test_reject_truncated(void **state)
 	sahara_images_free(images, MAPPING_SZ);
 }
 
+/* A sahara_config that fails to parse must not leak the loaded file */
+static void test_programmer_bad_config_frees_blob(void **state)
+{
+	struct sahara_image *images = zero_images();
+	char spec[] = "prog.xml";
+	(void)state;
+
+	stub_blob = "<?xml version=\"1.0\"?><sahara_config";
+	stub_blob_freed = false;
+
+	assert_int_equal(decode_programmer(spec, images), -1);
+	assert_true(stub_blob_freed);
+
+	stub_blob = NULL;
+	sahara_images_free(images, MAPPING_SZ);
+}
+
 int main(void)
 {
 	const struct CMUnitTest tests[] = {
@@ -262,6 +300,7 @@ int main(void)
 		cmocka_unit_test(test_reject_zero_image_id),
 		cmocka_unit_test(test_reject_unterminated_name),
 		cmocka_unit_test(test_reject_truncated),
+		cmocka_unit_test(test_programmer_bad_config_frees_blob),
 	};
 
 	return cmocka_run_group_tests(tests, NULL, NULL);

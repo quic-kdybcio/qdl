@@ -211,13 +211,18 @@ int decode_programmer(char *s, struct sahara_image *images)
 		if (ret < 0)
 			return -1;
 
+		/*
+		 * The decoders release archive's data, though not always
+		 * (a sahara_config that does not parse keeps it) and never
+		 * its name, so free what is left once it was not taken.
+		 */
 		ret = decode_programmer_archive(&archive, images);
-		if (ret < 0 || ret == 1)
+		if (ret == 0)
+			ret = decode_sahara_config(&archive, images, NULL);
+		if (ret < 0 || ret == 1) {
+			sahara_images_free(&archive, 1);
 			return ret;
-
-		ret = decode_sahara_config(&archive, images, NULL);
-		if (ret < 0 || ret == 1)
-			return ret;
+		}
 
 		images[SAHARA_ID_EHOSTDL_IMG] = archive;
 	}

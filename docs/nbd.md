@@ -31,11 +31,17 @@ development files are missing) instead of the default auto-detection.
 
 The plugin can be run with `nbdkit`; see the example below for details.
 
-- `programmer` - path to the Firehose loader to upload (required; may be an
-  absolute path or a path relative to the current working directory)
+- `programmer` - Firehose programmer to upload (required), given like qdl's
+  programmer argument: a loader, a programmer archive, a `sahara_config` XML
+  for multi-image programmers, or a comma-separated list of `<id>:<file>`
+  pairs. Paths may be absolute or relative to the current working directory;
+  the files are loaded when `nbdkit` starts
 - `lun` - physical partition (LUN) to expose, defaults to `LUN 0` which usually
   contains the userdata/HLOS partitions
 - `storage` - `ufs` or `emmc`, selects the firehose configuration
+- `serial` - serial number of the EDL device to use, as shown by `qdl list`,
+  matched case-insensitively. Without it the plugin uses the first EDL device
+  it finds, so set it whenever more than one board is attached
 - `timeout` - seconds to wait for an EDL device when setting the device up,
   defaults to `60`. Use `0` to wait indefinitely, as `qdl` itself does
 - `debug` - set to `1` for verbose qdl logging

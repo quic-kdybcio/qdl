@@ -25,6 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "programmer.h"
 #include "qdl.h"
 
 /*
@@ -47,7 +48,8 @@ bool qdl_debug;
 /* Bounded so that the millisecond deadline below cannot overflow */
 #define QDL_TIMEOUT_MAX 86400
 
-static const char *config_programmer;
+static char *config_programmer;
+static char *config_serial;
 static enum qdl_storage_type config_storage = QDL_STORAGE_UFS;
 static int config_lun;
 static unsigned int config_timeout = 60;
@@ -69,14 +71,37 @@ static struct qdl_device *dev;
 static size_t sector_size;
 static size_t num_sectors;
 
+/*
+ * The programmer images, loaded once while nbdkit still runs in the user's
+ * working directory, so relative paths resolve as they do for qdl. Uploading
+ * them does not consume them, so they serve every setup retry.
+ */
+static struct sahara_image programmer_images[MAPPING_SZ];
+
 static int qdl_plugin_config(const char *key, const char *value)
 {
 	int ret;
 
 	if (!strcmp(key, "programmer")) {
-		config_programmer = nbdkit_absolute_path(value);
-		if (!config_programmer)
+		/* @value only lives for the duration of this callback */
+		free(config_programmer);
+		config_programmer = strdup(value);
+		if (!config_programmer) {
+			nbdkit_error("strdup: %m");
 			return -1;
+		}
+	} else if (!strcmp(key, "serial")) {
+		if (!*value) {
+			nbdkit_error("serial must not be empty");
+			return -1;
+		}
+		/* @value only lives for the duration of this callback */
+		free(config_serial);
+		config_serial = strdup(value);
+		if (!config_serial) {
+			nbdkit_error("strdup: %m");
+			return -1;
+		}
 	} else if (!strcmp(key, "storage")) {
 		config_storage = decode_storage_type(value);
 		if (config_storage == QDL_STORAGE_UNKNOWN) {
@@ -113,8 +138,32 @@ static int qdl_plugin_config(const char *key, const char *value)
 
 static int qdl_plugin_config_complete(void)
 {
+	char *programmer;
+	int ret;
+
 	if (!config_programmer) {
 		nbdkit_error("the 'programmer' parameter is required");
+		return -1;
+	}
+
+	nbdkit_debug("programmer: %s", config_programmer);
+
+	/*
+	 * Decode a copy, since decode_programmer() tokenizes its argument and
+	 * keeps pointers into it. nbdkit changes to / only after this
+	 * callback, so relative paths still resolve here.
+	 */
+	programmer = strdup(config_programmer);
+	if (!programmer) {
+		nbdkit_error("strdup: %m");
+		return -1;
+	}
+
+	ret = decode_programmer(programmer, programmer_images);
+	free(programmer);
+	if (ret < 0) {
+		nbdkit_error("failed to load programmer '%s'", config_programmer);
+		sahara_images_free(programmer_images, MAPPING_SZ);
 		return -1;
 	}
 
@@ -148,7 +197,7 @@ static int qdl_device_open_wait(struct qdl_device *d)
 		nbdkit_debug("waiting for an EDL device (no timeout)");
 
 	for (;;) {
-		ret = usb_open_once(d, NULL, &visible);
+		ret = usb_open_once(d, config_serial, &visible);
 		if (ret == 0)
 			return 0;
 
@@ -171,12 +220,19 @@ static int qdl_device_open_wait(struct qdl_device *d)
 
 	/*
 	 * A device that is visible but cannot be opened is different from one
-	 * that is absent. This usually indicates insufficient permissions or
-	 * that the device is already in use by another process.
+	 * that is absent. Without a serial this usually indicates insufficient
+	 * permissions or that the device is already in use by another process;
+	 * with one, the visible devices may simply be other boards.
 	 */
-	if (visible)
+	if (visible && config_serial)
+		nbdkit_error("%d EDL device(s) visible after %us, none with serial '%s' could be opened",
+			     visible, config_timeout, config_serial);
+	else if (visible)
 		nbdkit_error("%d EDL device(s) visible after %us, none could be opened (permissions? in use?)",
 			     visible, config_timeout);
+	else if (config_serial)
+		nbdkit_error("no EDL device with serial '%s' found after %us",
+			     config_serial, config_timeout);
 	else
 		nbdkit_error("no EDL device found after %us", config_timeout);
 
@@ -189,9 +245,7 @@ static int qdl_device_open_wait(struct qdl_device *d)
  */
 static int qdl_device_setup(void)
 {
-	struct sahara_image images[MAPPING_SZ] = {};
 	struct qdl_device *d;
-	int ret;
 
 	d = qdl_init(QDL_DEVICE_USB);
 	if (!d) {
@@ -202,15 +256,7 @@ static int qdl_device_setup(void)
 	if (qdl_device_open_wait(d) < 0)
 		goto err_deinit;
 
-	if (load_sahara_image(NULL, config_programmer,
-			      &images[SAHARA_ID_EHOSTDL_IMG]) < 0) {
-		nbdkit_error("failed to load programmer '%s'", config_programmer);
-		goto err_close;
-	}
-
-	ret = sahara_run(d, images, NULL, NULL);
-	sahara_images_free(images, MAPPING_SZ);
-	if (ret < 0) {
+	if (sahara_run(d, programmer_images, NULL, NULL) < 0) {
 		nbdkit_error("failed to upload programmer");
 		goto err_close;
 	}
@@ -285,6 +331,10 @@ static int qdl_plugin_after_fork(void)
 
 static void qdl_plugin_unload(void)
 {
+	sahara_images_free(programmer_images, MAPPING_SZ);
+	free(config_programmer);
+	config_programmer = NULL;
+
 	if (!dev)
 		return;
 

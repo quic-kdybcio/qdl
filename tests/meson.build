@@ -95,6 +95,32 @@ foreach s : hil_vip_steps
   )
 endforeach
 
+# nbdkit plugin suite: nbd_list is the main suite's list step, skipped
+# before entering EDL mode when the plugin or its tools are missing; the nbd
+# step serves physical partition 0 through the plugin. The plugin resets the
+# board on exit, so run this suite on its own, against a board freshly put
+# into EDL mode:
+#   meson test -C build --suite hil-nbd
+hil_nbd_steps = [
+  ['list devices',             'nbd_list', 110],
+  ['nbdkit plugin round-trip', 'nbd',  100],
+]
+
+foreach s : hil_nbd_steps
+  test(
+    'HIL-NBD ' + s[0],
+    find_program('bash'),
+    args: [meson.current_source_dir() / 'test_hil.sh',
+           '--builddir', meson.project_build_root(),
+           '--step', s[1]],
+    depends: [qdl_exe, nbdkit_plugin],
+    suite: 'hil-nbd',
+    is_parallel: false,
+    priority: s[2],
+    timeout: 600,
+  )
+endforeach
+
 # --- unit tests (cmocka) ---
 if cmocka_dep.found()
   test_flashmap = executable('test_flashmap',
