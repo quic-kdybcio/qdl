@@ -23,6 +23,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Rust Cache save/restore
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
+          cache-directories: build/rust-target
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
       - name: Dependencies
         run: |
           sudo apt-get update
@@ -102,6 +109,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Rust Cache save/restore
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
+          cache-directories: build/rust-target
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
@@ -133,6 +147,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Rust Cache save/restore
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
+          cache-directories: build/rust-target
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Dependencies
         run: |
@@ -207,6 +228,13 @@ jobs:
             mingw-w64-x86_64-rust
             mingw-w64-x86_64-xz
             zip
+
+      - name: Rust Cache save/restore
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
+          cache-directories: build/rust-target
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Configure git line endings
         run: git config --global core.autocrlf true

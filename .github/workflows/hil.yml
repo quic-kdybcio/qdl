@@ -60,6 +60,13 @@ jobs:
           fi
           cargo --version
 
+      - name: Rust Cache save/restore
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
+          cache-directories: build/rust-target
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
       - name: Configure
         run: meson setup build
 
@@ -122,6 +129,13 @@ jobs:
             mingw-w64-x86_64-rust
             mingw-w64-x86_64-xz
             zip
+
+      - name: Rust Cache save/restore
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
+          cache-directories: build/rust-target
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Configure
         run: meson setup build
