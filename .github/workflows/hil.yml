@@ -52,6 +52,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Check Rust
+        run: |
+          if ! command -v cargo >/dev/null; then
+            echo "::error::cargo not found; install Rust on this runner (https://rustup.rs) before running HIL" >&2
+            exit 1
+          fi
+          cargo --version
+
       - name: Configure
         run: meson setup build
 
@@ -111,6 +119,7 @@ jobs:
             mingw-w64-x86_64-libxml2
             mingw-w64-x86_64-libusb
             mingw-w64-x86_64-libzip
+            mingw-w64-x86_64-rust
             mingw-w64-x86_64-xz
             zip
 
