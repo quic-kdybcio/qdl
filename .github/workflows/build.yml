@@ -93,7 +93,7 @@ jobs:
       - name: Dependencies
         run: |
           dnf install -y --enablerepo=crb \
-            gcc git help2man meson ninja-build pkgconf-pkg-config zip \
+            gcc git help2man meson ninja-build pkgconf-pkg-config rust-toolset zip \
             'pkgconfig(cmocka)' 'pkgconfig(libusb-1.0)' \
             'pkgconfig(libxml-2.0)' 'pkgconfig(libzip)'
 
@@ -204,6 +204,7 @@ jobs:
             mingw-w64-x86_64-libxml2
             mingw-w64-x86_64-libusb
             mingw-w64-x86_64-libzip
+            mingw-w64-x86_64-rust
             mingw-w64-x86_64-xz
             zip
 

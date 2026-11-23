@@ -19,7 +19,7 @@
   apt-get update -qq >/dev/null &&
   apt-get install -y -qq --no-install-recommends git ca-certificates
   build-essential pkg-config libusb-1.0-0-dev libxml2-dev libzip-dev
-  meson ninja-build usbutils nbdkit nbdkit-plugin-dev libnbd-bin >/dev/null &&
+  meson ninja-build cargo rustc usbutils nbdkit nbdkit-plugin-dev libnbd-bin >/dev/null &&
   lava-test-case deps --result pass ||
   { lava-test-case deps --result fail; lava-test-raise deps; }
 - >-
