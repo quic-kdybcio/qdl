@@ -343,7 +343,6 @@ if cmocka_dep.found()
     sources : [
       'test_program_load_xml.c',
       'common.c',
-      pathbuf_src,
       program_src,
       util_src,
     ],
@@ -361,28 +360,21 @@ if cmocka_dep.found()
     env: ['CMOCKA_MESSAGE_OUTPUT=TAP'],
   )
 
-  test_pathbuf = executable('test_pathbuf',
-    sources : [
-      'test_pathbuf.c',
-      pathbuf_src,
-    ],
-    dependencies : common_dep + [cmocka_dep],
-    include_directories : inc,
-    link_depends : rust_lib,
-  )
-
+  # A cold cargo test build (debug profile, not the release build that
+  # meson compile already produced) can exceed meson's 30 second default
+  # on the slower CI runners.
   test(
-    'pathbuf dirname behavior',
-    test_pathbuf,
+    'pathbuf unit tests',
+    cargo,
+    args: ['test', '--locked', '--manifest-path', rust_manifest,
+           '--target-dir', join_paths(meson.project_build_root(), 'rust-target')],
     suite: 'unit',
-    protocol: 'tap',
-    env: ['CMOCKA_MESSAGE_OUTPUT=TAP'],
+    timeout: 300,
   )
 
   test_contents_selectors = executable('test_contents_selectors',
     sources : [
       'test_contents_selectors.c',
-      pathbuf_src,
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
@@ -401,7 +393,6 @@ if cmocka_dep.found()
     sources : [
       'test_contents_xml.c',
       'common.c',
-      pathbuf_src,
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,

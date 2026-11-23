@@ -4,3 +4,5 @@
  */
 //! Rust half of qdl. Functions marked with #[export] are callable from C;
 //! their prototypes are declared by hand in the C headers next to them.
+
+mod pathbuf;
