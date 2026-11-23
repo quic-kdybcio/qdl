@@ -131,6 +131,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -170,6 +171,7 @@ if cmocka_dep.found()
       ],
       dependencies : common_dep + [cmocka_dep],
       include_directories : inc,
+      link_depends : rust_lib,
       c_args : ['-ffunction-sections', '-fdata-sections', '-fno-jump-tables'],
       link_args : gc_sections,
     )
@@ -190,6 +192,7 @@ if cmocka_dep.found()
       ],
       dependencies : common_dep + [cmocka_dep],
       include_directories : inc,
+      link_depends : rust_lib,
       c_args : ['-ffunction-sections', '-fdata-sections'],
       link_args : gc_sections,
     )
@@ -212,6 +215,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test_programmer = executable('test_programmer',
@@ -221,6 +225,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -246,6 +251,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -264,6 +270,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -284,6 +291,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -302,6 +310,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -319,6 +328,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -339,6 +349,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
     c_args : ['-Daccess=mock_access'],
   )
 
@@ -357,6 +368,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -374,6 +386,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -392,6 +405,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(
@@ -408,6 +422,7 @@ if cmocka_dep.found()
     ],
     dependencies : common_dep + [cmocka_dep],
     include_directories : inc,
+    link_depends : rust_lib,
   )
 
   test(

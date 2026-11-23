@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: BSD-3-Clause
+[package]
+name = "qdl-rs"
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+publish = false
+
+[lib]
+name = "qdl_rs"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+libc = "0.2"
+qdl-macros = { path = "../qdl-macros" }

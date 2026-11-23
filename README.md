@@ -55,6 +55,9 @@ brew install qdl
 
 ## Build
 
+This assumes an existing Rust installation. In case you lack one, please follow
+the installation steps on [rustup.rs](https://rustup.rs/).
+
 ### Linux
 
 ```bash
